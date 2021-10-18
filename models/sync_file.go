@@ -41,8 +41,8 @@ func syncFile(branch Branch, branchSHA string, files []string) error {
 	n := len(files)
 	ch := make(chan fetchFileResult, n)
 
-	for _, f := range files {
-		pool.Submit(func() {
+	task := func(f string) func() {
+		return func() {
 			sha, content, err := c.GetFileConent(branch, f)
 			if err != nil {
 				ch <- fetchFileResult{
@@ -64,7 +64,11 @@ func syncFile(branch Branch, branchSHA string, files []string) error {
 					},
 				}
 			}
-		})
+		}
+	}
+
+	for _, f := range files {
+		_ = pool.Submit(task(f))
 	}
 
 	log := logrus.WithFields(
