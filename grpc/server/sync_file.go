@@ -5,16 +5,17 @@ import (
 	"time"
 
 	"github.com/panjf2000/ants/v2"
+	"github.com/sirupsen/logrus"
 
 	"github.com/opensourceways/sync-file-server/models"
 	"github.com/opensourceways/sync-file-server/protocol"
 )
 
-func newSyncFileServer(concurrentSize int, log ants.Logger) (*syncFileServer, error) {
+func newSyncFileServer(concurrentSize int) (*syncFileServer, error) {
 	p, err := ants.NewPool(concurrentSize, ants.WithOptions(ants.Options{
 		PreAlloc:    true,
 		Nonblocking: true,
-		Logger:      log,
+		Logger:      logWapper{},
 	}))
 	if err != nil {
 		return nil, err
@@ -48,7 +49,7 @@ func (s *syncFileServer) SyncFile(ctx context.Context, input *protocol.SyncFileR
 
 	err := s.submitTask(ctx, func() {
 		if err := opt.Create(); err != nil {
-			//log
+			logrus.WithError(err).Error("Error to sychronize files: %+v", opt)
 		}
 	})
 
@@ -69,7 +70,7 @@ func (s *syncFileServer) SyncRepoFile(ctx context.Context, input *protocol.SyncR
 
 	err := s.submitTask(ctx, func() {
 		if err := opt.Create(); err != nil {
-			//log
+			logrus.WithError(err).Errorf("Error to synchronize repo files: %+v", opt)
 		}
 	})
 

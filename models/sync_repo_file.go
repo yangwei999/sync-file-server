@@ -34,13 +34,21 @@ func (s SyncRepoFileOption) Create() error {
 		}
 	}
 
+	log := logEntryForBranch(s.Branch, s.BranchSHA)
+	logError := func(f, msg string, err error) {
+		log.WithField("file name", f).WithError(err).Error(msg)
+	}
+
 	for fileName, item := range files {
 		todo, err := s.filterFile(fileName, item)
 		if err != nil {
-
+			logError(fileName, "filter file", err)
+			return err
 		}
 
-		syncFile(s.Branch, s.BranchSHA, todo)
+		if err := syncFile(s.Branch, s.BranchSHA, todo); err != nil {
+			logError(fileName, "sync file", err)
+		}
 	}
 	return nil
 }
@@ -62,13 +70,10 @@ func (s SyncRepoFileOption) filterFile(fileName string, files []RepoFile) ([]str
 		m[item.Path] = item.SHA
 	}
 
-	i := 0
-	n := len(files)
-	todo := make([]string, n)
+	todo := make([]string, 0, len(files))
 	for _, item := range files {
 		if item.SHA != m[item.Path] {
-			todo[i] = item.Path
-			i++
+			todo = append(todo, item.Path)
 		}
 	}
 	return todo, nil
