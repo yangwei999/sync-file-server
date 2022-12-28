@@ -3,14 +3,19 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 
+	"github.com/ghodss/yaml"
+	"github.com/opensourceways/community-robot-lib/kafka"
 	"github.com/opensourceways/community-robot-lib/logrusutil"
+	"github.com/opensourceways/community-robot-lib/mq"
 	"github.com/opensourceways/community-robot-lib/secret"
 	"github.com/sirupsen/logrus"
 
 	"github.com/opensourceways/sync-file-server/grpc/server"
+	"github.com/opensourceways/sync-file-server/models"
 )
 
 type options struct {
@@ -18,6 +23,8 @@ type options struct {
 	endpoint          string
 	platform          string
 	platformTokenPath string
+	topic             string
+	configFile        string
 	concurrentSize    int
 }
 
@@ -26,6 +33,8 @@ func (o *options) addFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.endpoint, "endpoint", "", "The endpoint of repo file cache")
 	fs.StringVar(&o.platform, "platform", "gitee", "The code platform which implements rpc service. Currently only gitee is supported")
 	fs.StringVar(&o.platformTokenPath, "platform-token-path", "/etc/platform/oauth", "The path to the token file which is used to access code platform.")
+	fs.StringVar(&o.topic, "topic", "", "The topic to which jobs need to be published ")
+	fs.StringVar(&o.configFile, "config-file", "", "Path to the config file.")
 
 	fs.IntVar(&o.concurrentSize, "concurrent-size", 2000, "The grpc server goroutine pool size.")
 }
@@ -40,6 +49,15 @@ func (o *options) validate() error {
 	if o.concurrentSize <= 0 {
 		return fmt.Errorf("concurrent size must be bigger than 0")
 	}
+
+	if o.configFile == "" {
+		return fmt.Errorf("config-file must be set")
+	}
+
+	if o.topic == "" {
+		return fmt.Errorf("topic must be set")
+	}
+
 	return nil
 }
 
@@ -69,11 +87,54 @@ func main() {
 	getToken := secretAgent.GetTokenGenerator(o.platformTokenPath)
 
 	backend, err := newBackend(o.endpoint, o.platform, getToken)
+
 	if err != nil {
 		logrus.WithError(err).Fatal("Error to generate backend")
 	}
 
+	if err = initBroker(o.configFile); err != nil {
+		logrus.WithError(err).Fatal("error to init broker")
+	}
+
+	s, err := models.SyncFromMQ(o.topic)
+	if err != nil {
+		logrus.WithError(err).Fatal("error to subscribe")
+	}
+	defer s.Unsubscribe()
+
 	if err := server.Start(":"+o.port, o.concurrentSize, backend); err != nil {
 		logrus.WithError(err).Fatal("Error to start grpc server.")
 	}
+}
+
+func initBroker(configFile string) error {
+	cfg, err := loadConfig(configFile)
+	if err != nil {
+		return fmt.Errorf("load config:%s", configFile)
+	}
+
+	err = kafka.Init(
+		mq.Addresses(cfg.MQConfig.Addresses...),
+		mq.Log(logrus.WithField("module", "broker")),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return kafka.Connect()
+}
+
+func loadConfig(path string) (*configuration, error) {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	v := new(configuration)
+	if err := yaml.Unmarshal(b, v); err != nil {
+		return nil, err
+	}
+
+	return v, nil
 }

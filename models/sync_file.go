@@ -41,55 +41,40 @@ func fetchFileError(f string, err error) fetchFileResult {
 }
 
 func syncFile(branch Branch, branchSHA string, files []string) error {
-	if len(files) == 0 {
+	n := len(files)
+	if n == 0 {
 		return nil
 	}
 
 	c := backend.GetClient()
-	n := len(files)
-	ch := make(chan fetchFileResult, n)
 
-	task := func(f string) func() {
-		return func() {
-			sha, content, err := c.GetFileConent(branch, f)
-			if err != nil {
-				ch <- fetchFileError(f, err)
-			} else {
-				ch <- fetchFileResult{
-					File: File{
-						RepoFile: RepoFile{
-							Path: f,
-							SHA:  sha,
-						},
-						Content: content,
-					},
-				}
-			}
+	getFileContent := func(f string) (fetchFileResult, error) {
+		sha, content, err := c.GetFileConent(branch, f)
+		if err != nil {
+			return fetchFileResult{}, err
 		}
-	}
 
-	for _, f := range files {
-		if err := pool.Submit(task(f)); err != nil {
-			ch <- fetchFileError(f, err)
-		}
+		return fetchFileResult{
+			File: File{
+				RepoFile: RepoFile{
+					Path: f,
+					SHA:  sha,
+				},
+				Content: content,
+			},
+		}, nil
 	}
 
 	log := logEntryForBranch(branch, branchSHA)
 
-	i := 0
 	result := make([]File, 0, n)
-	for r := range ch {
-		if r.err == nil {
-			result = append(result, r.File)
-		} else {
+	for _, f := range files {
+		if r, err := getFileContent(f); err != nil {
 			log.WithField("file", r.Path).WithError(r.err).Error("sync file")
-		}
-
-		if i++; i == n {
-			break
+		} else {
+			result = append(result, r.File)
 		}
 	}
-	close(ch)
 
 	if n := len(result); n > 0 {
 		if err := c.SaveFiles(branch, branchSHA, result); err != nil {
@@ -97,12 +82,14 @@ func syncFile(branch Branch, branchSHA string, files []string) error {
 			for i := range result {
 				fs[i] = result[i].Path
 			}
+
 			return fmt.Errorf(
 				"error to save files: %s, err: %v",
 				strings.Join(fs, "; "), err,
 			)
 		}
 	}
+
 	return nil
 }
 

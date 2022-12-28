@@ -1,6 +1,11 @@
 package models
 
 import (
+	"encoding/json"
+
+	"github.com/opensourceways/community-robot-lib/kafka"
+	"github.com/opensourceways/community-robot-lib/mq"
+
 	"github.com/opensourceways/sync-file-server/backend"
 )
 
@@ -14,11 +19,49 @@ type SyncRepoFileOption struct {
 	FileNames []string `json:"file_names" required:"true"`
 }
 
+type msgTask struct {
+	Org       string   `json:"org"`
+	Repo      string   `json:"repo"`
+	Branch    string   `json:"branch"`
+	BranchSHA string   `json:"branchSHA"`
+	Files     []string `json:"files"`
+}
+
+func SyncFromMQ(topic string) (mq.Subscriber, error) {
+	return kafka.Subscribe(topic, handle)
+}
+
+func handle(e mq.Event) error {
+	body := e.Message().Body
+	mt := new(msgTask)
+	if err := json.Unmarshal(body, mt); err != nil {
+		return err
+	}
+
+	opt := SyncRepoFileOption{
+		Branch: Branch{
+			Org:    mt.Org,
+			Repo:   mt.Repo,
+			Branch: mt.Branch,
+		},
+		BranchSHA: mt.BranchSHA,
+		FileNames: mt.Files,
+	}
+
+	if err := opt.Create(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s SyncRepoFileOption) Create() error {
 	c := backend.GetClient()
+	log := logEntryForBranch(s.Branch, s.BranchSHA)
 
 	allFiles, err := c.ListAllFilesOfRepo(s.Branch)
 	if err != nil {
+		log.WithError(err).Error()
 		return err
 	}
 
@@ -34,7 +77,6 @@ func (s SyncRepoFileOption) Create() error {
 		}
 	}
 
-	log := logEntryForBranch(s.Branch, s.BranchSHA)
 	logError := func(f, msg string, err error) {
 		log.WithField("file name", f).WithError(err).Error(msg)
 	}
@@ -54,7 +96,9 @@ func (s SyncRepoFileOption) Create() error {
 		if err := syncFile(s.Branch, s.BranchSHA, todo); err != nil {
 			logError(fileName, "sync file", err)
 		}
+		log.Info("sync file success: ", fileName)
 	}
+
 	return nil
 }
 
