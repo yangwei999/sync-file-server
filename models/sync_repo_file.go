@@ -27,8 +27,10 @@ type msgTask struct {
 	Files     []string `json:"files"`
 }
 
-func SyncFromMQ(topic string) (mq.Subscriber, error) {
-	return kafka.Subscribe(topic, handle)
+func SyncFromMQ(topic, component string) (mq.Subscriber, error) {
+	return kafka.Subscribe(topic, handle, func(options *mq.SubscribeOptions) {
+		options.Queue = component
+	})
 }
 
 func handle(e mq.Event) error {

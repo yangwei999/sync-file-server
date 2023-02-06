@@ -68,6 +68,8 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	return o
 }
 
+const component = "sync-file-server"
+
 func main() {
 	logrusutil.ComponentInit("sync-file-server")
 
@@ -96,7 +98,7 @@ func main() {
 		logrus.WithError(err).Fatal("error to init broker")
 	}
 
-	s, err := models.SyncFromMQ(o.topic)
+	s, err := models.SyncFromMQ(o.topic, component)
 	if err != nil {
 		logrus.WithError(err).Fatal("error to subscribe")
 	}
